@@ -1,0 +1,7 @@
+/.codegraph/*
+/.gemini/*
+/.git/*
+/__pycache__/*
+/modules/__pycache__/*
+/tests/*
+/venv_312/*
