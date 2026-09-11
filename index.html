@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DJI 行业无人机航巡时空研判与回放平台 | DJI Flight Log 3D Viewer</title>
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- Top Header -->
+    <header class="top-header">
+      <div class="brand-section">
+        <div class="brand-icon">
+          <svg viewBox="0 0 24 24">
+            <path d="M12 2L4 6v6c0 5.55 3.84 10.74 8 12 4.16-1.26 8-6.45 8-12V6l-8-4zm0 3.18l6 3v4.82c0 4.29-2.91 8.35-6 9.5-3.09-1.15-6-5.21-6-9.5V8.18l6-3zM11 7v6h2V7h-2zm0 8v2h2v-2h-2z"/>
+          </svg>
+        </div>
+        <div class="brand-title">
+          <h1>DJI 行业无人机航巡时空研判平台</h1>
+          <span>SPATIOTEMPORAL TELEMETRY VIEWER</span>
+        </div>
+      </div>
+
+      <!-- Flight Metadata Chips -->
+      <div class="meta-chips">
+        <div class="chip" id="chipModel">
+          <span class="chip-label">机型</span>
+          <span class="chip-val" id="valModel">未加载</span>
+        </div>
+        <div class="chip" id="chipDuration">
+          <span class="chip-label">航时</span>
+          <span class="chip-val" id="valDuration">00:00</span>
+        </div>
+        <div class="chip" id="chipDistance">
+          <span class="chip-label">航程</span>
+          <span class="chip-val" id="valDistance">0 m</span>
+        </div>
+        <div class="chip" id="chipMaxAlt">
+          <span class="chip-label">最大海拔</span>
+          <span class="chip-val" id="valMaxAlt">0 m</span>
+        </div>
+        <div class="chip" id="chipRtk">
+          <span class="chip-label">定位</span>
+          <span class="chip-badge badge-rtk-none" id="valRtk">OFFLINE</span>
+        </div>
+        <div class="chip" id="chipBattery">
+          <span class="chip-label">电芯压差</span>
+          <span class="chip-val" id="valBatteryDiff">0 mV</span>
+        </div>
+      </div>
+
+      <!-- Action Buttons -->
+      <div class="header-actions">
+        <button class="btn btn-primary" id="btnDemo">🚀 一键演示</button>
+        <button class="btn" id="btnOpenLog">📂 加载日志</button>
+        <button class="btn" id="btnOpenWpml">🗺️ 导入航线</button>
+        <button class="btn" id="btnToggleDrawer">📊 遥测看板</button>
+      </div>
+    </header>
+
+    <!-- Central Viewport -->
+    <main class="viewport-wrapper">
+      <div id="cesiumContainer"></div>
+
+      <!-- Floating Avionics HUD -->
+      <div class="hud-container">
+        <div class="hud-title-bar">
+          <span>AVIONICS HUD</span>
+          <span id="hudFps">60 FPS</span>
+        </div>
+        <canvas id="hudCanvas" width="360" height="240"></canvas>
+      </div>
+
+      <!-- Floating Viewport Controls -->
+      <div class="floating-toolbar">
+        <div class="tool-group">
+          <span class="tool-label">视角:</span>
+          <select id="selectCameraMode" class="select-input">
+            <option value="follow">伴随跟踪 (Follow)</option>
+            <option value="free">自由视角 (Free)</option>
+            <option value="top_down">正射俯视 (Top-Down)</option>
+            <option value="fpv_gimbal">机载云台 (FPV)</option>
+          </select>
+        </div>
+
+        <div class="tool-group">
+          <span class="tool-label">航迹着色:</span>
+          <select id="selectColorMode" class="select-input">
+            <option value="rtk">RTK 定位精度</option>
+            <option value="speed">飞行速度梯度</option>
+            <option value="altitude">海拔高程梯度</option>
+            <option value="deviation">WPML 空间偏差</option>
+          </select>
+        </div>
+
+        <div class="tool-group">
+          <button id="btnToggleFrustum" class="toggle-btn active">云台视锥: 开</button>
+          <button id="btnFlyTo" class="btn" style="height:26px; padding: 0 8px;">🎯 居中</button>
+        </div>
+      </div>
+    </main>
+
+    <!-- Bottom Playback Control Bar -->
+    <footer class="bottom-bar">
+      <div class="play-controls">
+        <button class="btn btn-primary btn-circle" id="btnPlayPause">▶</button>
+        <div class="time-display">
+          <span class="time-current" id="timeCurrent">00:00</span>
+          <span class="time-divider">/</span>
+          <span class="time-total" id="timeTotal">00:00</span>
+        </div>
+      </div>
+
+      <!-- Interactive Timeline Scrubber -->
+      <div class="timeline-wrapper">
+        <div id="timelineContainer"></div>
+        <div class="timeline-legend">
+          <div class="legend-item"><span class="legend-dot" style="background:#10b981;"></span>拍照点</div>
+          <div class="legend-item"><span class="legend-dot" style="background:#f59e0b;"></span>告警</div>
+          <div class="legend-item"><span class="legend-dot" style="background:#ef4444;"></span>压差异常</div>
+        </div>
+      </div>
+
+      <!-- Playback Speed Pills -->
+      <div class="rate-pills">
+        <button class="rate-btn" data-rate="0.5">0.5x</button>
+        <button class="rate-btn active" data-rate="1">1.0x</button>
+        <button class="rate-btn" data-rate="2">2.0x</button>
+        <button class="rate-btn" data-rate="4">4.0x</button>
+        <button class="rate-btn" data-rate="8">8.0x</button>
+      </div>
+
+      <!-- Altitude Source Reference Toggle -->
+      <button class="btn" id="btnAltSource" style="height:32px; font-size:11px;">高程: 椭球高(ASL)</button>
+    </footer>
+
+    <!-- Slide-out Telemetry Drawer -->
+    <aside class="telemetry-drawer" id="telemetryDrawer">
+      <div class="drawer-header">
+        <div class="drawer-title">
+          <span>📈 动力电池与遥测工况综合看板</span>
+        </div>
+        <button class="btn" id="btnCloseDrawer" style="height:28px; padding:0 8px;">✕</button>
+      </div>
+
+      <div class="drawer-tabs">
+        <button class="tab-btn active" data-tab="battery">动力电池工况</button>
+        <button class="tab-btn" data-tab="dynamics">飞行姿态与动度</button>
+        <button class="tab-btn" data-tab="events">事件与告警列表</button>
+      </div>
+
+      <div class="drawer-body">
+        <!-- Stat Cards Grid -->
+        <div class="stat-cards-grid">
+          <div class="stat-card">
+            <div class="stat-card-title">最大电芯压差</div>
+            <div class="stat-card-value card-normal" id="statMaxDiff">-- <span class="stat-card-unit">mV</span></div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-card-title">电池总电压极值</div>
+            <div class="stat-card-value" id="statVoltageRange">-- <span class="stat-card-unit">V</span></div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-card-title">最高电芯温度</div>
+            <div class="stat-card-value" id="statMaxTemp">-- <span class="stat-card-unit">°C</span></div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-card-title">航线最大 3D 偏差</div>
+            <div class="stat-card-value" id="statMaxDeviation">-- <span class="stat-card-unit">m</span></div>
+          </div>
+        </div>
+
+        <!-- Section 1: Battery Chart Box -->
+        <div class="chart-container-box" id="sectionBatteryChart">
+          <div class="chart-header">
+            <span>电量(%) / 总电压(V) / 电芯压差(mV)</span>
+            <span style="color:var(--color-cyan);" id="chartCursorTime">0.0s</span>
+          </div>
+          <canvas id="batteryChartCanvas" class="chart-canvas" width="400" height="140"></canvas>
+        </div>
+
+        <!-- Section 2: Dynamics Chart Box -->
+        <div class="chart-container-box" id="sectionDynamicsChart">
+          <div class="chart-header">
+            <span>地速(m/s) & 海拔高程(m)</span>
+          </div>
+          <canvas id="dynamicsChartCanvas" class="chart-canvas" width="400" height="140"></canvas>
+        </div>
+
+        <!-- Section 3: Event & Warning Table / List -->
+        <div class="event-list" id="eventsListContainer">
+          <div style="text-align:center; color:var(--color-text-dim); padding:20px 0;">暂无事件记录</div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Drag & Drop Overlay -->
+    <div class="drag-overlay" id="dragOverlay">
+      <div class="drag-icon">📁</div>
+      <div class="drag-title">拖放 DJI 飞行日志或航线文件至此处</div>
+      <div class="drag-subtitle">支持 .DAT / .txt (加密飞行日志) 与 .kmz / .kml (DJI WPML航线)</div>
+    </div>
+
+    <!-- Hidden File Inputs -->
+    <input type="file" id="inputLogFile" accept=".DAT,.txt,.bin" style="display:none" />
+    <input type="file" id="inputWpmlFile" accept=".kml,.kmz,.xml" style="display:none" />
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
