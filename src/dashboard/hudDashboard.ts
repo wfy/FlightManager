@@ -136,9 +136,9 @@ export class HUDDashboard {
   /**
    * Synchronizes ECharts timeline cursor to current playback time in seconds.
    */
-  public syncCharts(currentTime: number): void {
+  public syncCharts(currentTime: number, dataIndex?: number): void {
     if (this.chartInstance) {
-      syncChartTime(this.chartInstance, currentTime);
+      syncChartTime(this.chartInstance, currentTime, dataIndex);
     }
   }
 

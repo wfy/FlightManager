@@ -159,7 +159,7 @@ export class EventTimeline {
     // 1. Photos
     if (pkg.events?.photos && this.options.showPhotoMarkers) {
       for (const p of pkg.events.photos) {
-        const timeSec = t0 > 0 ? (p.timestamp - t0) / 1000 : 0;
+        const timeSec = Number.isFinite(p.timestamp) ? (p.timestamp - t0) / 1000 : 0;
         this.events.push({
           id: p.id || `photo-${p.index}`,
           type: 'photo',
@@ -175,7 +175,7 @@ export class EventTimeline {
     if (pkg.events?.warnings && this.options.showWarningMarkers) {
       for (let i = 0; i < pkg.events.warnings.length; i++) {
         const w = pkg.events.warnings[i];
-        const timeSec = t0 > 0 ? (w.timestamp - t0) / 1000 : 0;
+        const timeSec = Number.isFinite(w.timestamp) ? (w.timestamp - t0) / 1000 : 0;
         this.events.push({
           id: `warning-${i}-${w.code}`,
           type: 'warning',
@@ -210,6 +210,9 @@ export class EventTimeline {
    * Attaches interactive canvas scrubber to DOM container.
    */
   public attach(container: HTMLElement): void {
+    if (this.canvas) {
+      this.destroy();
+    }
     this.container = container;
 
     if (typeof document !== 'undefined') {
@@ -296,8 +299,8 @@ export class EventTimeline {
     const canvas = this.canvas;
     if (!ctx || !canvas) return;
 
-    const width = canvas.clientWidth || canvas.width || 600;
-    const height = canvas.clientHeight || canvas.height || this.options.height;
+    const width = canvas.clientWidth > 0 ? canvas.clientWidth : 600;
+    const height = canvas.clientHeight > 0 ? canvas.clientHeight : this.options.height;
 
     const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
     if (canvas.width !== Math.round(width * dpr) || canvas.height !== Math.round(height * dpr)) {

@@ -66,7 +66,8 @@ export function detectAbnormalCellVoltage(
     const diff = telemetry.maxCellVoltageDiff[i];
     if (diff > thresholdVolts) {
       const ts = telemetry.timestamps[i] ?? 0;
-      const timeSec = t0 > 0 ? (ts - t0) / 1000 : i;
+      const hasTs = Boolean(telemetry.timestamps && telemetry.timestamps.length > 0);
+      const timeSec = hasTs ? Number(((ts - t0) / 1000).toFixed(3)) : i;
 
       anomalies.push({
         index: i,
@@ -110,7 +111,7 @@ export function extractBatterySeries(
   for (let i = 0; i < length; i++) {
     const ts = telemetry.timestamps[i];
     timestamps[i] = ts;
-    timeSeconds[i] = t0 > 0 ? Number(((ts - t0) / 1000).toFixed(3)) : i;
+    timeSeconds[i] = length > 0 ? Number(((ts - t0) / 1000).toFixed(3)) : i;
 
     const pct = telemetry.batteryPercents ? telemetry.batteryPercents[i] : 0;
     percents[i] = pct;
@@ -289,15 +290,11 @@ export function buildTelemetryChartOptions(
   const timeSeconds: number[] = new Array(len);
   const altitudes: number[] = new Array(len);
   const speeds: number[] = new Array(len);
-  const pitches: number[] = new Array(len);
-  const rolls: number[] = new Array(len);
 
   for (let i = 0; i < len; i++) {
-    timeSeconds[i] = t0 > 0 ? Number(((telemetry.timestamps[i] - t0) / 1000).toFixed(3)) : i;
+    timeSeconds[i] = len > 0 ? Number(((telemetry.timestamps[i] - t0) / 1000).toFixed(3)) : i;
     altitudes[i] = telemetry.altitudes ? telemetry.altitudes[i] : 0;
     speeds[i] = telemetry.speeds ? telemetry.speeds[i] : 0;
-    pitches[i] = telemetry.pitch ? telemetry.pitch[i] : 0;
-    rolls[i] = telemetry.roll ? telemetry.roll[i] : 0;
   }
 
   const batteryData = extractBatterySeries(telemetry, config.thresholdVolts ?? 0.05);
@@ -455,15 +452,20 @@ export function buildTelemetryChartOptions(
  * Synchronizes the ECharts time cursor with the current flight playback time.
  * Dispatches `showTip` action or sets axisPointer position safely without crashing.
  */
-export function syncChartTime(chartInstance: any, timeSec: number): boolean {
+export function syncChartTime(chartInstance: any, timeSec: number, dataIndex?: number): boolean {
   if (!chartInstance) return false;
 
   try {
     if (typeof chartInstance.dispatchAction === 'function') {
+      const targetIndex =
+        dataIndex !== undefined && Number.isFinite(dataIndex)
+          ? Math.max(0, dataIndex)
+          : Math.max(0, Math.floor(timeSec * 10));
+
       chartInstance.dispatchAction({
         type: 'showTip',
         seriesIndex: 0,
-        dataIndex: Math.max(0, Math.floor(timeSec * 10)), // fallback estimation if dataIndex is used
+        dataIndex: targetIndex,
       });
       return true;
     }
