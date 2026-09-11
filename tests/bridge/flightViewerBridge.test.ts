@@ -515,5 +515,111 @@ describe('Flight Viewer Host Bridge Protocol', () => {
       expect(errorSpy).toHaveBeenCalledTimes(1);
       expect(errorSpy.mock.calls[0][0].code).toBe('EXECUTION_ERROR');
     });
+
+    it('should execute LOAD_FLIGHT with direct package and stringified flightJson, reconstructing TypedArrays', () => {
+      bridge = new FlightViewerBridge({ autoRegisterWindow: false });
+      const mockViewer = {
+        loadFlight: vi.fn(),
+      };
+      bridge.attachViewer(mockViewer as any);
+
+      const flightLoadedSpy = vi.fn();
+      bridge.on('FLIGHT_LOADED', flightLoadedSpy);
+
+      // Case 1: Direct object
+      const pkg1 = {
+        meta: { durationMs: 60000 },
+        telemetry: {
+          timestamps: new Float64Array([1000, 2000]),
+          longitudes: new Float64Array([120.0, 120.1]),
+        },
+      };
+      bridge.handleMessage({ type: 'LOAD_FLIGHT', payload: { flightPackage: pkg1 } });
+      expect(mockViewer.loadFlight).toHaveBeenCalledTimes(1);
+      expect(flightLoadedSpy).toHaveBeenCalledTimes(1);
+
+      // Case 2: Stringified flightJson with plain arrays (e.g. from Unity JSON)
+      const pkg2Json = JSON.stringify({
+        meta: { durationMs: 120000 },
+        telemetry: {
+          timestamps: [5000, 6000, 7000],
+          longitudes: [121.0, 121.1, 121.2],
+          latitudes: [31.0, 31.1, 31.2],
+          altitudes: [100.0, 105.0, 110.0],
+        },
+      });
+      bridge.handleMessage({ type: 'LOAD_FLIGHT', payload: { flightJson: pkg2Json } });
+      expect(mockViewer.loadFlight).toHaveBeenCalledTimes(2);
+      expect(flightLoadedSpy).toHaveBeenCalledTimes(2);
+
+      const loadedPkg = mockViewer.loadFlight.mock.calls[1][0];
+      expect(loadedPkg.telemetry.timestamps).toBeInstanceOf(Float64Array);
+      expect(loadedPkg.telemetry.longitudes).toBeInstanceOf(Float64Array);
+      expect(loadedPkg.telemetry.altitudes).toBeInstanceOf(Float32Array);
+    });
+
+    it('should execute LOAD_WPML with direct route and stringified wpmlJson', () => {
+      bridge = new FlightViewerBridge({ autoRegisterWindow: false });
+      const mockViewer = {
+        loadPlannedRoute: vi.fn(),
+      };
+      bridge.attachViewer(mockViewer as any);
+
+      // Case 1: Direct object
+      const route1 = {
+        name: 'Route-1',
+        waypoints: [{ index: 0, lon: 120.0, lat: 30.0, alt: 100.0 }],
+      };
+      bridge.handleMessage({ type: 'LOAD_WPML', payload: { route: route1 } });
+      expect(mockViewer.loadPlannedRoute).toHaveBeenCalledTimes(1);
+
+      // Case 2: Stringified wpmlJson
+      const route2 = {
+        name: 'Route-2',
+        waypoints: [{ index: 0, lon: 121.0, lat: 31.0, alt: 120.0 }],
+      };
+      bridge.handleMessage({ type: 'LOAD_WPML', payload: { wpmlJson: JSON.stringify(route2) } });
+      expect(mockViewer.loadPlannedRoute).toHaveBeenCalledTimes(2);
+      expect(mockViewer.loadPlannedRoute).toHaveBeenLastCalledWith(route2);
+    });
+
+    it('should prevent message storms and self-loops when window.parent === window', () => {
+      const originalWindow = globalThis.window;
+      let postMessageCount = 0;
+      let listener: any = null;
+
+      const fakeWindow: any = {
+        addEventListener: vi.fn((event, fn) => {
+          listener = fn;
+        }),
+        removeEventListener: vi.fn(),
+        postMessage: vi.fn((data) => {
+          postMessageCount++;
+          if (listener && postMessageCount < 5) {
+            listener({ data, origin: 'http://localhost' });
+          }
+        }),
+      };
+      fakeWindow.parent = fakeWindow; // Top-level window condition
+      (globalThis as any).window = fakeWindow;
+
+      try {
+        bridge = new FlightViewerBridge({ autoRegisterWindow: true });
+        bridge.init(); // emits READY
+
+        // When parent === window, sendToHost must not post to parent
+        expect(fakeWindow.postMessage).not.toHaveBeenCalled();
+
+        // Even if an outbound event is received on handleMessage, it must not loop
+        const handled = bridge.handleMessage({
+          type: 'READY',
+          payload: { version: '1.0.0' },
+          source: 'dji-flight-log-viewer',
+        });
+        expect(handled).toBe(false);
+      } finally {
+        globalThis.window = originalWindow;
+      }
+    });
   });
 });

@@ -45,6 +45,66 @@ namespace DJI.FlightViewer.Bridge
         public long timestamp;
     }
 
+    [Serializable]
+    public class ReadyEventEnvelope
+    {
+        public string type;
+        public ReadyPayload payload;
+        public string id;
+        public string source;
+        public long timestamp;
+    }
+
+    [Serializable]
+    public class FlightLoadedEventEnvelope
+    {
+        public string type;
+        public FlightLoadedPayload payload;
+        public string id;
+        public string source;
+        public long timestamp;
+    }
+
+    [Serializable]
+    public class TimeUpdateEventEnvelope
+    {
+        public string type;
+        public TimeUpdatePayload payload;
+        public string id;
+        public string source;
+        public long timestamp;
+    }
+
+    [Serializable]
+    public class EventClickedEventEnvelope
+    {
+        public string type;
+        public EventClickedPayload payload;
+        public string id;
+        public string source;
+        public long timestamp;
+    }
+
+    [Serializable]
+    public class DeviationAlertEventEnvelope
+    {
+        public string type;
+        public DeviationAlertPayload payload;
+        public string id;
+        public string source;
+        public long timestamp;
+    }
+
+    [Serializable]
+    public class ErrorEventEnvelope
+    {
+        public string type;
+        public ErrorPayload payload;
+        public string id;
+        public string source;
+        public long timestamp;
+    }
+
     // Inbound Command Payloads (Unity -> Web)
     [Serializable]
     public class SeekPayload
@@ -358,8 +418,9 @@ namespace DJI.FlightViewer.Bridge
         /// </summary>
         public Quaternion AircraftEulerToUnityQuaternion(float pitch, float roll, float yaw)
         {
-            // Unity Y is Up, Z is North, X is East
-            return Quaternion.Euler(pitch, yaw, -roll);
+            // Unity Y is Up, Z is North, X is East.
+            // In Unity left-handed system, pitch up is negative rotation around X axis.
+            return Quaternion.Euler(-pitch, yaw, -roll);
         }
 
         #endregion
@@ -384,17 +445,17 @@ namespace DJI.FlightViewer.Bridge
                     switch (envelope.type)
                     {
                         case "READY":
-                            var readyData = JsonUtility.FromJson<BridgeEnvelope<ReadyPayload>>(jsonMessage);
+                            var readyData = JsonUtility.FromJson<ReadyEventEnvelope>(jsonMessage);
                             onReady?.Invoke(readyData?.payload);
                             break;
 
                         case "FLIGHT_LOADED":
-                            var loadedData = JsonUtility.FromJson<BridgeEnvelope<FlightLoadedPayload>>(jsonMessage);
+                            var loadedData = JsonUtility.FromJson<FlightLoadedEventEnvelope>(jsonMessage);
                             onFlightLoaded?.Invoke(loadedData?.payload);
                             break;
 
                         case "TIME_UPDATE":
-                            var timeData = JsonUtility.FromJson<BridgeEnvelope<TimeUpdatePayload>>(jsonMessage);
+                            var timeData = JsonUtility.FromJson<TimeUpdateEventEnvelope>(jsonMessage);
                             if (timeData?.payload != null)
                             {
                                 HandleTimeUpdate(timeData.payload);
@@ -402,17 +463,17 @@ namespace DJI.FlightViewer.Bridge
                             break;
 
                         case "EVENT_CLICKED":
-                            var eventData = JsonUtility.FromJson<BridgeEnvelope<EventClickedPayload>>(jsonMessage);
+                            var eventData = JsonUtility.FromJson<EventClickedEventEnvelope>(jsonMessage);
                             onEventClicked?.Invoke(eventData?.payload);
                             break;
 
                         case "DEVIATION_ALERT":
-                            var alertData = JsonUtility.FromJson<BridgeEnvelope<DeviationAlertPayload>>(jsonMessage);
+                            var alertData = JsonUtility.FromJson<DeviationAlertEventEnvelope>(jsonMessage);
                             onDeviationAlert?.Invoke(alertData?.payload);
                             break;
 
                         case "ERROR":
-                            var errData = JsonUtility.FromJson<BridgeEnvelope<ErrorPayload>>(jsonMessage);
+                            var errData = JsonUtility.FromJson<ErrorEventEnvelope>(jsonMessage);
                             onError?.Invoke(errData?.payload);
                             break;
 
@@ -441,8 +502,8 @@ namespace DJI.FlightViewer.Bridge
 
                 if (gimbalTarget != null)
                 {
-                    // Gimbal pitch relative to aircraft
-                    _targetGimbalRotation = Quaternion.Euler(frame.gimbalPitch, 0f, 0f);
+                    // Gimbal pitch relative to aircraft (DJI negative pitch is looking down towards ground, which corresponds to positive X rotation in Unity)
+                    _targetGimbalRotation = Quaternion.Euler(-frame.gimbalPitch, 0f, 0f);
                 }
 
                 if (!_hasReceivedInitialTelemetry)

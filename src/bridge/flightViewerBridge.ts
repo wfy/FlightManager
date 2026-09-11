@@ -33,6 +33,15 @@ export type OutboundEventType =
   | 'DEVIATION_ALERT'
   | 'ERROR';
 
+export const OUTBOUND_EVENT_TYPES = new Set<string>([
+  'READY',
+  'FLIGHT_LOADED',
+  'TIME_UPDATE',
+  'EVENT_CLICKED',
+  'DEVIATION_ALERT',
+  'ERROR',
+]);
+
 export type BridgeMessageType = InboundCommandType | OutboundEventType;
 
 export interface BridgeEnvelope<T = unknown> {
@@ -78,12 +87,15 @@ export interface FlyToDronePayload {
 }
 
 export interface LoadFlightPayload {
-  flightPackage: FlightRecordPackage;
-  deviation?: DeviationResult;
+  flightPackage?: FlightRecordPackage;
+  flightJson?: string;
+  deviation?: DeviationResult | string;
 }
 
 export interface LoadWpmlPayload {
-  route: WPMLRoute;
+  route?: WPMLRoute;
+  wpmlRoute?: WPMLRoute;
+  wpmlJson?: string;
 }
 
 // Outbound event payloads
@@ -327,8 +339,8 @@ export class FlightViewerBridge {
       }
     }
 
-    // 3. Iframe embedding parent window
-    if (win.parent && typeof win.parent.postMessage === 'function') {
+    // 3. Iframe embedding parent window (only when embedded inside an iframe)
+    if (win.parent && win.parent !== win && typeof win.parent.postMessage === 'function') {
       try {
         win.parent.postMessage(envelope, targetOrigin);
       } catch (e) {
@@ -336,7 +348,7 @@ export class FlightViewerBridge {
           console.warn('[FlightViewerBridge] Failed to postMessage to parent:', e);
         }
       }
-    } else if (win.opener && typeof win.opener.postMessage === 'function') {
+    } else if (win.opener && win.opener !== win && typeof win.opener.postMessage === 'function') {
       try {
         win.opener.postMessage(envelope, targetOrigin);
       } catch (e) {
@@ -391,6 +403,16 @@ export class FlightViewerBridge {
 
     // Validate envelope structure
     if (!parsed || typeof parsed !== 'object' || typeof parsed.type !== 'string') {
+      return false;
+    }
+
+    // Ignore messages originating from this bridge itself
+    if (parsed.source === this.options.sourceId) {
+      return false;
+    }
+
+    // Silently ignore outbound event types received on inbound channel (prevents echo / loop storms)
+    if (OUTBOUND_EVENT_TYPES.has(parsed.type)) {
       return false;
     }
 
@@ -500,13 +522,32 @@ export class FlightViewerBridge {
           break;
 
         case 'LOAD_FLIGHT': {
-          const pkg = payload?.flightPackage ?? payload;
-          const dev = payload?.deviation;
-          if (pkg && pkg.telemetry) {
+          let rawPkg = payload?.flightPackage ?? payload?.flightJson ?? payload;
+          if (typeof rawPkg === 'string') {
+            try {
+              rawPkg = JSON.parse(rawPkg);
+            } catch (err) {
+              this.sendError('PARSE_ERROR', 'Failed to parse flightPackage JSON string', { error: err });
+              return;
+            }
+          }
+          const pkg = rawPkg;
+          let dev = payload?.deviation;
+          if (typeof dev === 'string') {
+            try {
+              dev = JSON.parse(dev);
+            } catch {
+              // ignore deviation parse failure
+            }
+          }
+          if (pkg && (pkg.telemetry || pkg.meta)) {
+            if (pkg.telemetry) {
+              this.ensureTelemetryTypedArrays(pkg.telemetry);
+            }
             this.viewer.loadFlight(pkg, dev);
             this.sendToHost('FLIGHT_LOADED', {
               durationSec: (pkg.meta?.durationMs ?? 0) / 1000,
-              pointCount: pkg.telemetry.longitudes?.length ?? 0,
+              pointCount: pkg.telemetry?.longitudes?.length ?? 0,
               meta: pkg.meta,
             });
           }
@@ -514,7 +555,16 @@ export class FlightViewerBridge {
         }
 
         case 'LOAD_WPML': {
-          const route = payload?.route ?? payload;
+          let rawRoute = payload?.route ?? payload?.wpmlRoute ?? payload?.wpmlJson ?? payload;
+          if (typeof rawRoute === 'string') {
+            try {
+              rawRoute = JSON.parse(rawRoute);
+            } catch (err) {
+              this.sendError('PARSE_ERROR', 'Failed to parse WPML route JSON string', { error: err });
+              return;
+            }
+          }
+          const route = rawRoute;
           if (route && Array.isArray(route.waypoints)) {
             this.viewer.loadPlannedRoute(route);
           }
@@ -523,6 +573,71 @@ export class FlightViewerBridge {
       }
     } catch (err) {
       this.sendError('EXECUTION_ERROR', `Failed executing command ${type}`, { error: err });
+    }
+  }
+
+  /**
+   * Ensures that telemetry streams deserialized from JSON objects or plain arrays
+   * are reconstituted into proper TypedArrays expected by CesiumViewer and solvers.
+   */
+  private ensureTelemetryTypedArrays(telemetry: any): void {
+    if (!telemetry) return;
+    const toArray = (v: any) => {
+      if (!v) return [];
+      if (Array.isArray(v)) return v;
+      if (typeof v === 'object') {
+        const keys = Object.keys(v).filter((k) => !isNaN(Number(k))).sort((a, b) => Number(a) - Number(b));
+        return keys.map((k) => v[k]);
+      }
+      return [];
+    };
+    if (telemetry.timestamps && !(telemetry.timestamps instanceof Float64Array)) {
+      telemetry.timestamps = new Float64Array(toArray(telemetry.timestamps));
+    }
+    if (telemetry.longitudes && !(telemetry.longitudes instanceof Float64Array)) {
+      telemetry.longitudes = new Float64Array(toArray(telemetry.longitudes));
+    }
+    if (telemetry.latitudes && !(telemetry.latitudes instanceof Float64Array)) {
+      telemetry.latitudes = new Float64Array(toArray(telemetry.latitudes));
+    }
+    if (telemetry.altitudes && !(telemetry.altitudes instanceof Float32Array)) {
+      telemetry.altitudes = new Float32Array(toArray(telemetry.altitudes));
+    }
+    if (telemetry.heights && !(telemetry.heights instanceof Float32Array)) {
+      telemetry.heights = new Float32Array(toArray(telemetry.heights));
+    }
+    if (telemetry.pitch && !(telemetry.pitch instanceof Float32Array)) {
+      telemetry.pitch = new Float32Array(toArray(telemetry.pitch));
+    }
+    if (telemetry.roll && !(telemetry.roll instanceof Float32Array)) {
+      telemetry.roll = new Float32Array(toArray(telemetry.roll));
+    }
+    if (telemetry.yaw && !(telemetry.yaw instanceof Float32Array)) {
+      telemetry.yaw = new Float32Array(toArray(telemetry.yaw));
+    }
+    if (telemetry.speeds && !(telemetry.speeds instanceof Float32Array)) {
+      telemetry.speeds = new Float32Array(toArray(telemetry.speeds));
+    }
+    if (telemetry.rtkStatus && !(telemetry.rtkStatus instanceof Uint8Array)) {
+      telemetry.rtkStatus = new Uint8Array(toArray(telemetry.rtkStatus));
+    }
+    if (telemetry.batteryPercents && !(telemetry.batteryPercents instanceof Uint8Array)) {
+      telemetry.batteryPercents = new Uint8Array(toArray(telemetry.batteryPercents));
+    }
+    if (telemetry.batteryVoltages && !(telemetry.batteryVoltages instanceof Float32Array)) {
+      telemetry.batteryVoltages = new Float32Array(toArray(telemetry.batteryVoltages));
+    }
+    if (telemetry.maxCellVoltageDiff && !(telemetry.maxCellVoltageDiff instanceof Float32Array)) {
+      telemetry.maxCellVoltageDiff = new Float32Array(toArray(telemetry.maxCellVoltageDiff));
+    }
+    if (telemetry.maxCellTemp && !(telemetry.maxCellTemp instanceof Float32Array)) {
+      telemetry.maxCellTemp = new Float32Array(toArray(telemetry.maxCellTemp));
+    }
+    if (telemetry.gimbalPitch && !(telemetry.gimbalPitch instanceof Float32Array)) {
+      telemetry.gimbalPitch = new Float32Array(toArray(telemetry.gimbalPitch));
+    }
+    if (telemetry.gimbalYaw && !(telemetry.gimbalYaw instanceof Float32Array)) {
+      telemetry.gimbalYaw = new Float32Array(toArray(telemetry.gimbalYaw));
     }
   }
 
