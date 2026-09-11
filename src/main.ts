@@ -15,7 +15,7 @@ import type { FlightRecordPackage, DeviationResult, WPMLRoute } from './core/typ
 import { parseDjiFlightLog, buildMockDjiBinaryBuffer } from './parser/djiParser';
 import { parseWPMLRoute } from './parser/wpmlParser';
 import { calculateTrajectoryDeviation } from './spatial/deviationSolver';
-import { Flight3DViewerEngine, type CameraMode } from './viewport/cesiumViewer';
+import { Flight3DViewerEngine, type CameraMode, type BasemapType } from './viewport/cesiumViewer';
 import type { ColorMode, InterpolatedTelemetry } from './viewport/trajectoryLayer';
 import { HUDDashboard } from './dashboard/hudDashboard';
 import { FlightViewerBridge } from './bridge/flightViewerBridge';
@@ -38,11 +38,13 @@ class FlightViewerApp {
   private btnPlayPause!: HTMLButtonElement;
   private timeCurrent!: HTMLElement;
   private timeTotal!: HTMLElement;
+  private selectBasemap!: HTMLSelectElement;
   private selectCameraMode!: HTMLSelectElement;
   private selectColorMode!: HTMLSelectElement;
   private btnToggleFrustum!: HTMLButtonElement;
   private btnFlyTo!: HTMLButtonElement;
   private btnAltSource!: HTMLButtonElement;
+  private btnDjiKey!: HTMLButtonElement;
   private telemetryDrawer!: HTMLElement;
   private btnToggleDrawer!: HTMLButtonElement;
   private btnCloseDrawer!: HTMLButtonElement;
@@ -131,19 +133,23 @@ class FlightViewerApp {
     // 5. Connect Bridge Commands & Outbound Events
     this.setupBridgeHandlers();
 
-    // 6. Automatically Load Built-in Demo Flight for Immediate Interactivity
-    this.loadDemoFlight();
+    // Default to free-roam camera mode over centered 3D Earth
+    if (this.selectCameraMode) {
+      this.selectCameraMode.value = 'free';
+    }
   }
 
   private cacheDomElements(): void {
     this.btnPlayPause = document.getElementById('btnPlayPause') as HTMLButtonElement;
     this.timeCurrent = document.getElementById('timeCurrent') as HTMLElement;
     this.timeTotal = document.getElementById('timeTotal') as HTMLElement;
+    this.selectBasemap = document.getElementById('selectBasemap') as HTMLSelectElement;
     this.selectCameraMode = document.getElementById('selectCameraMode') as HTMLSelectElement;
     this.selectColorMode = document.getElementById('selectColorMode') as HTMLSelectElement;
     this.btnToggleFrustum = document.getElementById('btnToggleFrustum') as HTMLButtonElement;
     this.btnFlyTo = document.getElementById('btnFlyTo') as HTMLButtonElement;
     this.btnAltSource = document.getElementById('btnAltSource') as HTMLButtonElement;
+    this.btnDjiKey = document.getElementById('btnDjiKey') as HTMLButtonElement;
     this.telemetryDrawer = document.getElementById('telemetryDrawer') as HTMLElement;
     this.btnToggleDrawer = document.getElementById('btnToggleDrawer') as HTMLButtonElement;
     this.btnCloseDrawer = document.getElementById('btnCloseDrawer') as HTMLButtonElement;
@@ -173,6 +179,25 @@ class FlightViewerApp {
     // Play / Pause
     this.btnPlayPause.addEventListener('click', () => {
       this.togglePlayPause();
+    });
+
+    // Basemap Switch
+    this.selectBasemap?.addEventListener('change', () => {
+      this.viewer.setBasemap(this.selectBasemap.value as BasemapType);
+    });
+
+    // DJI API Key Dialog
+    this.btnDjiKey?.addEventListener('click', () => {
+      const currentKey = localStorage.getItem('dji_openapi_key') || '';
+      const newKey = prompt(
+        '请输入 DJI 官方开放平台 API Key (用于硬件加密日志解密钥匙链)：\n' +
+        '（若仅研判工区位置、航高、航时、航拍曝光点等元数据，可留空）',
+        currentKey
+      );
+      if (newKey !== null) {
+        localStorage.setItem('dji_openapi_key', newKey.trim());
+        alert(newKey.trim() ? 'DJI API Key 保存成功！重新加载日志即可触发解密。' : 'DJI API Key 已清空。');
+      }
     });
 
     // Camera Mode
@@ -403,13 +428,27 @@ class FlightViewerApp {
   public async handleLogFile(file: File): Promise<void> {
     try {
       const buffer = await file.arrayBuffer();
-      const pkg = await parseDjiFlightLog(buffer);
+      const apiKey = typeof localStorage !== 'undefined' ? localStorage.getItem('dji_openapi_key') || '' : '';
+      const pkg = await parseDjiFlightLog(buffer, { apiKey });
 
       let dev: DeviationResult | null = null;
       if (this.currentRoute) {
         dev = calculateTrajectoryDeviation(pkg.telemetry, this.currentRoute);
       }
       this.applyFlightPackage(pkg, dev || undefined);
+
+      if (pkg.meta.isEncryptedV14) {
+        const msg =
+          `✅ 成功解析大疆官方航巡日志！\n` +
+          `• 机型: ${pkg.meta.aircraftType} (SN: ${pkg.meta.aircraftSn || '已读取'})\n` +
+          `• 工区中心: ${pkg.meta.homeLocation[0].toFixed(5)}°E, ${pkg.meta.homeLocation[1].toFixed(5)}°N\n` +
+          `• 起飞海拔: ${pkg.meta.homeLocation[2].toFixed(1)}m | 航时: ${this.formatTime(pkg.meta.durationMs / 1000)} | 航程: ${pkg.meta.totalDistance.toFixed(0)}m\n` +
+          `• 航拍曝光事件: ${pkg.events.photos.length} 次\n\n` +
+          (pkg.meta.needsApiKey
+            ? `提示: 该日志为大疆 V14 硬件加密时序。系统已根据真实起飞工区及照片标记完成 3D 定位。如需解密 10Hz 姿态，可点击顶栏「🔑 DJI Key」配置官方 OpenAPI Key。`
+            : `10Hz 硬件加密轨迹已通过 DJI OpenAPI 完整解密。`);
+        setTimeout(() => alert(msg), 300);
+      }
     } catch (err: any) {
       console.error('Failed to parse flight log file:', err);
       alert(`解析飞行日志失败: ${err?.message || '未知格式错误'}`);
@@ -806,6 +845,7 @@ class FlightViewerApp {
 // Bootstrap Application when DOM is ready
 window.addEventListener('DOMContentLoaded', () => {
   const app = new FlightViewerApp();
+  (window as any).flightApp = app;
   app.initialize().catch((err) => {
     console.error('[FlightViewerApp] Fatal initialization error:', err);
   });

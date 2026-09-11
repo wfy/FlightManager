@@ -55,6 +55,7 @@
         <button class="btn btn-primary" id="btnDemo">🚀 一键演示</button>
         <button class="btn" id="btnOpenLog">📂 加载日志</button>
         <button class="btn" id="btnOpenWpml">🗺️ 导入航线</button>
+        <button class="btn" id="btnDjiKey">🔑 DJI Key</button>
         <button class="btn" id="btnToggleDrawer">📊 遥测看板</button>
       </div>
     </header>
@@ -75,10 +76,19 @@
       <!-- Floating Viewport Controls -->
       <div class="floating-toolbar">
         <div class="tool-group">
+          <span class="tool-label">底图:</span>
+          <select id="selectBasemap" class="select-input">
+            <option value="satellite" selected>🛰️ 高清卫星影像</option>
+            <option value="natural_earth">🌐 离线全球卫片</option>
+            <option value="grid">📐 暗色工程网格</option>
+          </select>
+        </div>
+
+        <div class="tool-group">
           <span class="tool-label">视角:</span>
           <select id="selectCameraMode" class="select-input">
+            <option value="free" selected>自由视角 (Free)</option>
             <option value="follow">伴随跟踪 (Follow)</option>
-            <option value="free">自由视角 (Free)</option>
             <option value="top_down">正射俯视 (Top-Down)</option>
             <option value="fpv_gimbal">机载云台 (FPV)</option>
           </select>

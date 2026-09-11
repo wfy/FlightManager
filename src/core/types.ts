@@ -12,6 +12,10 @@ export interface FlightMeta {
   totalDistance: number;
   maxAltitude: number;
   homeLocation: [number, number, number]; // [longitude, latitude, altitude]
+  isEncryptedV14?: boolean;
+  needsApiKey?: boolean;
+  recordLineCount?: number;
+  captureNum?: number;
 }
 
 export interface TelemetryStream {

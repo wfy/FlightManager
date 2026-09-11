@@ -151,6 +151,26 @@ describe('Crypto Utils (AES-128-CBC)', () => {
     const decryptedSync = decryptAes128CbcSync(ciphertextAsync, key, iv);
     expect(new TextDecoder().decode(decryptedSync)).toBe(text);
   });
+
+  it('should parse real DJI TXT v14 flight log (甘浙线-5287#) metadata gracefully', async () => {
+    // @ts-ignore
+    const fs = await import('fs');
+    const realLogPath = 'C:\\Users\\jayden\\xwechat_files\\wxid_wp10swleybr812_0029\\msg\\file\\2026-09\\甘浙线-5287#.txt';
+    if (!fs.existsSync(realLogPath)) {
+      return; // Skip if file is absent in environment
+    }
+    const buf = fs.readFileSync(realLogPath);
+    const pkg = await parseDjiFlightLog(buf.buffer);
+    expect(pkg.meta.aircraftType).toBe('MATRICE 4T');
+    expect(pkg.meta.aircraftSn).toBe('1581F7K3C267500D');
+    expect(pkg.meta.homeLocation[0]).toBeCloseTo(119.89845, 3);
+    expect(pkg.meta.homeLocation[1]).toBeCloseTo(29.95957, 3);
+    expect(pkg.meta.homeLocation[2]).toBeCloseTo(495.4, 1);
+    expect(pkg.meta.durationMs).toBeGreaterThan(600000);
+    expect(pkg.meta.isEncryptedV14).toBe(true);
+    expect(pkg.events.photos.length).toBe(34);
+    expect(pkg.telemetry.timestamps.length).toBeGreaterThan(50);
+  });
 });
 
 describe('Parser Worker Protocol', () => {

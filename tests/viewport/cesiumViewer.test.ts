@@ -11,8 +11,12 @@ describe('Flight3DViewerEngine', () => {
     expect(state.isPlaying).toBe(false);
     expect(state.currentTimeSec).toBe(0);
     expect(state.playbackRate).toBe(1.0);
-    expect(state.cameraMode).toBe('follow');
+    expect(state.cameraMode).toBe('free');
     expect(state.colorMode).toBe('rtk');
+    expect(state.basemap).toBe('satellite');
+
+    await engine.setBasemap('grid');
+    expect(engine.getBasemap()).toBe('grid');
   });
 
   it('should load flight record package and update duration', async () => {

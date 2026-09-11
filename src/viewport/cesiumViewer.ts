@@ -21,12 +21,14 @@ import {
 import { FrustumLayer } from './frustumLayer';
 
 export type CameraMode = 'follow' | 'free' | 'fpv_gimbal' | 'top_down';
+export type BasemapType = 'satellite' | 'natural_earth' | 'grid';
 
 export interface ViewerOptions {
   modelUri?: string;
   showGrid?: boolean;
   showFrustum?: boolean;
   defaultColorMode?: ColorMode;
+  defaultBasemap?: BasemapType;
   altitudeSource?: 'altitudes' | 'heights';
   altitudeOffset?: number;
   droneScale?: number;
@@ -49,10 +51,13 @@ export class Flight3DViewerEngine {
   private frustumLayer: FrustumLayer | null = null;
   private showFrustum = true;
 
+  private currentBasemap: BasemapType = 'satellite';
+  private baseImageryLayer: Cesium.ImageryLayer | null = null;
+
   private colorMode: ColorMode = 'rtk';
   private altitudeSource: 'altitudes' | 'heights' = 'altitudes';
   private altitudeOffset = 0;
-  private cameraMode: CameraMode = 'follow';
+  private cameraMode: CameraMode = 'free';
   private playbackRate = 1.0;
   private isPlaying = false;
 
@@ -99,18 +104,9 @@ export class Flight3DViewerEngine {
     // Ensure Cesium Ion token is empty (100% offline rule)
     Cesium.Ion.defaultAccessToken = '';
 
-    // Create 100% offline Cesium Viewer without any online services
+    // Create Cesium Viewer supporting realistic satellite imagery and offline fallbacks
     const viewer = new Cesium.Viewer(targetEl, {
-      baseLayer: options.showGrid !== false
-        ? new Cesium.ImageryLayer(
-            new Cesium.GridImageryProvider({
-              color: Cesium.Color.fromCssColorString('#37474F'),
-              glowColor: Cesium.Color.fromCssColorString('#263238'),
-              backgroundColor: Cesium.Color.fromCssColorString('#101418'),
-              cells: 8,
-            })
-          )
-        : false,
+      baseLayer: false,
       geocoder: false,
       homeButton: false,
       sceneModePicker: false,
@@ -122,16 +118,28 @@ export class Flight3DViewerEngine {
       vrButton: false,
       infoBox: false,
       selectionIndicator: false,
-      skyBox: false,
-      skyAtmosphere: false,
     });
 
-    // Dark-slate theme for offline globe
-    viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString('#1e293b');
+    // Space & globe illumination
+    viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString('#0B132B');
+    viewer.scene.globe.enableLighting = false;
     viewer.scene.globe.depthTestAgainstTerrain = false;
 
     this.viewer = viewer;
     this.frustumLayer.attach(viewer);
+
+    // Load initial basemap (ArcGIS World Imagery with Natural Earth II fallback)
+    await this.setBasemap(options.defaultBasemap ?? 'satellite');
+
+    // Default camera perspective: Centered 3D Globe (macro view over China/East Asia)
+    viewer.camera.setView({
+      destination: Cesium.Cartesian3.fromDegrees(108.0, 32.0, 16000000.0),
+      orientation: {
+        heading: Cesium.Math.toRadians(0),
+        pitch: Cesium.Math.toRadians(-90),
+        roll: 0,
+      },
+    });
 
     // Hook onto scene tick for smooth interpolation & camera tracking
     const onTick = () => {
@@ -465,8 +473,7 @@ export class Flight3DViewerEngine {
     const camera = this.viewer.camera;
 
     if (this.cameraMode === 'free') {
-      // Detach lookAt transform so user has full control
-      camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
+      // Detach lookAt transform so user has full free-roam camera control
       return;
     }
 
@@ -571,10 +578,64 @@ export class Flight3DViewerEngine {
   }
 
   /**
+   * Sets or switches the active basemap imagery provider.
+   */
+  public async setBasemap(type: BasemapType): Promise<void> {
+    this.currentBasemap = type;
+    if (!this.viewer) return;
+
+    try {
+      let provider: Cesium.ImageryProvider;
+      if (type === 'satellite') {
+        try {
+          provider = await Cesium.ArcGisMapServerImageryProvider.fromUrl(
+            'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer',
+            { enablePickFeatures: false }
+          );
+        } catch {
+          provider = await Cesium.TileMapServiceImageryProvider.fromUrl(
+            Cesium.buildModuleUrl('Assets/Textures/NaturalEarthII')
+          );
+        }
+      } else if (type === 'natural_earth') {
+        provider = await Cesium.TileMapServiceImageryProvider.fromUrl(
+          Cesium.buildModuleUrl('Assets/Textures/NaturalEarthII')
+        );
+      } else {
+        provider = new Cesium.GridImageryProvider({
+          color: Cesium.Color.fromCssColorString('#37474F'),
+          glowColor: Cesium.Color.fromCssColorString('#263238'),
+          backgroundColor: Cesium.Color.fromCssColorString('#101418'),
+          cells: 8,
+        });
+      }
+
+      const layers = this.viewer.imageryLayers;
+      if (this.baseImageryLayer) {
+        layers.remove(this.baseImageryLayer, true);
+        this.baseImageryLayer = null;
+      }
+
+      this.baseImageryLayer = layers.addImageryProvider(provider, 0);
+    } catch (err) {
+      console.warn('Failed to switch basemap imagery:', err);
+    }
+  }
+
+  /**
+   * Returns current active basemap type.
+   */
+  public getBasemap(): BasemapType {
+    return this.currentBasemap;
+  }
+
+  /**
    * Flies camera to encompass the full flight trajectory.
    */
   public flyToTrajectory(): void {
     if (!this.viewer || !this.flightPackage) return;
+    this.viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
+
     const lons = this.flightPackage.telemetry.longitudes;
     const lats = this.flightPackage.telemetry.latitudes;
     if (lons.length === 0) return;
@@ -591,11 +652,16 @@ export class Flight3DViewerEngine {
       if (lats[i] > maxLat) maxLat = lats[i];
     }
 
+    const dLon = Math.max(0.005, maxLon - minLon);
+    const dLat = Math.max(0.005, maxLat - minLat);
+    const centerLon = (minLon + maxLon) / 2;
+    const centerLat = (minLat + maxLat) / 2;
+
     const rect = Cesium.Rectangle.fromDegrees(
-      minLon - 0.002,
-      minLat - 0.002,
-      maxLon + 0.002,
-      maxLat + 0.002
+      centerLon - dLon * 1.5,
+      centerLat - dLat * 1.5,
+      centerLon + dLon * 1.5,
+      centerLat + dLat * 1.5
     );
 
     this.viewer.camera.flyTo({
@@ -631,6 +697,7 @@ export class Flight3DViewerEngine {
     playbackRate: number;
     cameraMode: CameraMode;
     colorMode: ColorMode;
+    basemap: BasemapType;
     altitudeSource: 'altitudes' | 'heights';
     altitudeOffset: number;
   } {
@@ -641,6 +708,7 @@ export class Flight3DViewerEngine {
       playbackRate: this.playbackRate,
       cameraMode: this.cameraMode,
       colorMode: this.colorMode,
+      basemap: this.currentBasemap,
       altitudeSource: this.altitudeSource,
       altitudeOffset: this.altitudeOffset,
     };
