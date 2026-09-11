@@ -14,9 +14,11 @@
     "@types/jszip": "^3.4.0",
     "typescript": "^5.4.5",
     "vite": "^5.2.11",
+    "vite-plugin-cesium": "^1.2.23",
     "vitest": "^1.6.0"
   },
   "dependencies": {
+    "cesium": "^1.145.0",
     "fast-xml-parser": "^5.11.1",
     "jszip": "^3.10.2"
   }
