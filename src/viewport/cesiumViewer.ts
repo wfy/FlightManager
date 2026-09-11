@@ -434,10 +434,16 @@ export class Flight3DViewerEngine {
     if (this.frustumLayer && this.showFrustum && this.viewer) {
       const gPitch = Number.isFinite(telemetry.gimbalPitch) ? telemetry.gimbalPitch : -45.0;
       const gYaw = Number.isFinite(telemetry.gimbalYaw) ? telemetry.gimbalYaw : telemetry.yaw;
+      const groundAlt =
+        Number.isFinite(telemetry.height) && telemetry.height > 0
+          ? telemetry.altitude - telemetry.height
+          : this.flightPackage?.meta.homeLocation?.[2] ?? 0;
+
       this.frustumLayer.update({
         position: [telemetry.longitude, telemetry.latitude, telemetry.altitude],
         gimbalPitch: gPitch,
         gimbalYaw: gYaw,
+        groundAltitude: groundAlt,
       });
     }
 

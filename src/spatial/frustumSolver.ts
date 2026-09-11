@@ -163,7 +163,7 @@ export function calculateFrustumGeometry(params: FrustumParams): FrustumGeometry
           z: groundAltitude,
         };
         endpointENU = groundPointENU;
-      } else {
+      } else if (tGround > maxRangeMeters) {
         // Intersects beyond maxRangeMeters -> clamp to maxRange
         const clampedT = maxRangeMeters;
         endpointENU = {
@@ -177,6 +177,14 @@ export function calculateFrustumGeometry(params: FrustumParams): FrustumGeometry
           y: clampedT * rayDirENU.y,
           z: groundAltitude,
         };
+      } else {
+        // Drone is beneath target groundAltitude (deltaZ >= 0 and dz < 0) -> no forward ground intersection
+        endpointENU = {
+          x: maxRangeMeters * rayDirENU.x,
+          y: maxRangeMeters * rayDirENU.y,
+          z: alt0 + maxRangeMeters * rayDirENU.z,
+        };
+        groundPointENU = null;
       }
     } else {
       // Ray points horizontal or upward (dz >= -1e-6) -> projects into sky at maxRange
