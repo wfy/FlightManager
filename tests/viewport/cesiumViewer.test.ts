@@ -52,6 +52,10 @@ describe('Flight3DViewerEngine', () => {
     expect(engine.getPlaybackState().altitudeSource).toBe('heights');
     expect(engine.getPlaybackState().altitudeOffset).toBe(15.0);
 
+    expect(engine.isFrustumVisible()).toBe(true);
+    engine.setFrustumVisible(false);
+    expect(engine.isFrustumVisible()).toBe(false);
+
     engine.seek(2.5);
     expect(engine.getPlaybackState().currentTimeSec).toBe(2.5);
 

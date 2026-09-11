@@ -18,12 +18,14 @@ import {
   type InterpolatedTelemetry,
   type TrajectoryOptions,
 } from './trajectoryLayer';
+import { FrustumLayer } from './frustumLayer';
 
 export type CameraMode = 'follow' | 'free' | 'fpv_gimbal' | 'top_down';
 
 export interface ViewerOptions {
   modelUri?: string;
   showGrid?: boolean;
+  showFrustum?: boolean;
   defaultColorMode?: ColorMode;
   altitudeSource?: 'altitudes' | 'heights';
   altitudeOffset?: number;
@@ -44,6 +46,8 @@ export class Flight3DViewerEngine {
   private trajectoryEntityIds: string[] = [];
   private routeEntityIds: string[] = [];
   private eventEntityIds: string[] = [];
+  private frustumLayer: FrustumLayer | null = null;
+  private showFrustum = true;
 
   private colorMode: ColorMode = 'rtk';
   private altitudeSource: 'altitudes' | 'heights' = 'altitudes';
@@ -68,9 +72,11 @@ export class Flight3DViewerEngine {
     options: ViewerOptions = {}
   ): Promise<void> {
     this.options = options;
+    this.showFrustum = options.showFrustum !== false;
     this.colorMode = options.defaultColorMode ?? 'rtk';
     this.altitudeSource = options.altitudeSource ?? 'altitudes';
     this.altitudeOffset = options.altitudeOffset ?? 0;
+    this.frustumLayer = new FrustumLayer();
 
     // Resolve container element
     let targetEl: HTMLElement | null = null;
@@ -125,6 +131,7 @@ export class Flight3DViewerEngine {
     viewer.scene.globe.depthTestAgainstTerrain = false;
 
     this.viewer = viewer;
+    this.frustumLayer.attach(viewer);
 
     // Hook onto scene tick for smooth interpolation & camera tracking
     const onTick = () => {
@@ -423,6 +430,17 @@ export class Flight3DViewerEngine {
     // Camera Tracking
     this.updateCamera(position, telemetry);
 
+    // Dynamic camera frustum update
+    if (this.frustumLayer && this.showFrustum && this.viewer) {
+      const gPitch = Number.isFinite(telemetry.gimbalPitch) ? telemetry.gimbalPitch : -45.0;
+      const gYaw = Number.isFinite(telemetry.gimbalYaw) ? telemetry.gimbalYaw : telemetry.yaw;
+      this.frustumLayer.update({
+        position: [telemetry.longitude, telemetry.latitude, telemetry.altitude],
+        gimbalPitch: gPitch,
+        gimbalYaw: gYaw,
+      });
+    }
+
     // Notify listeners
     for (const cb of this.timeUpdateCallbacks) {
       cb(timeSec, telemetry);
@@ -647,9 +665,31 @@ export class Flight3DViewerEngine {
   }
 
   /**
+   * Toggles visibility of dynamic gimbal camera frustum and ground footprint.
+   */
+  public setFrustumVisible(visible: boolean): void {
+    this.showFrustum = visible;
+    if (this.frustumLayer) {
+      this.frustumLayer.setVisible(visible);
+    }
+  }
+
+  /**
+   * Returns whether camera frustum rendering is currently enabled.
+   */
+  public isFrustumVisible(): boolean {
+    return this.showFrustum;
+  }
+
+  /**
    * Destroys the viewer and releases all GPU / memory resources.
    */
   public destroy(): void {
+    if (this.frustumLayer) {
+      this.frustumLayer.destroy();
+      this.frustumLayer = null;
+    }
+
     if (this.tickRemoveCallback) {
       this.tickRemoveCallback();
       this.tickRemoveCallback = null;
