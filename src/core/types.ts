@@ -94,6 +94,7 @@ export interface DeviationResult {
   stats: {
     maxDeviation: number;
     avgDeviation: number;
+    averageDeviation?: number;
     maxVerticalDiff: number;
     maxLateralDiff: number;
     warningCount: number;

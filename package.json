@@ -11,8 +11,13 @@
     "test:watch": "vitest"
   },
   "devDependencies": {
+    "@types/jszip": "^3.4.0",
     "typescript": "^5.4.5",
     "vite": "^5.2.11",
     "vitest": "^1.6.0"
+  },
+  "dependencies": {
+    "fast-xml-parser": "^5.11.1",
+    "jszip": "^3.10.2"
   }
 }
